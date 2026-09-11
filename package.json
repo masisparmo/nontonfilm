@@ -1,0 +1,23 @@
+{
+  "name": "yuknonton-streaming",
+  "version": "1.0.0",
+  "description": "YukNonton - Nonton Film & Serial TV Streaming Sub Indo",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "streaming",
+    "movies",
+    "series",
+    "netflix-clone",
+    "yuknonton"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}
