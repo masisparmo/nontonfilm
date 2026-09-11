@@ -1,7 +1,7 @@
 // YukNonton Frontend Application Controller
-// Smart API Base: Otomatis mendeteksi jika dijalankan di GitHub Pages / file:///
-const IS_STATIC_HOST = window.location.hostname.includes('github.io') || window.location.protocol === 'file:';
-const API_BASE = IS_STATIC_HOST ? 'https://streaming-project-eta.vercel.app' : '';
+// Smart API Base: Otomatis mendeteksi jika dijalankan di localhost atau domain publik (nontonfilm.isparmo.com, github.io, dll)
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_BASE = isLocal ? '' : 'https://streaming-project-eta.vercel.app';
 
 class NetflixApp {
   constructor() {
@@ -13,6 +13,15 @@ class NetflixApp {
 
     this.initElements();
     this.initEvents();
+
+    // 1. Render instan dari CATALOG_SEED jika tersedia (0ms loading)
+    if (window.CATALOG_SEED) {
+      this.catalog = window.CATALOG_SEED;
+      this.switchCategory("home");
+      this.updateMyListBadges();
+    }
+
+    // 2. Muat pembaruan katalog terbaru dari server di latar belakang
     this.loadCatalog();
   }
 
@@ -322,15 +331,16 @@ class NetflixApp {
   async loadCatalog(force = false) {
     try {
       const res = await fetch(`${API_BASE}/api/catalog${force ? "?refresh=true" : ""}`);
+      if (!res.ok) throw new Error("Status " + res.status);
       this.catalog = await res.json();
       this.switchCategory(this.currentCategory || "home");
       this.updateMyListBadges();
     } catch (err) {
-      console.error("Failed to load catalog:", err);
-      // Fallback jika API terputus
-      if (window.catalogSeed) {
-        this.catalog = window.catalogSeed;
+      console.warn("API catalog fetch warning, checking fallback seed:", err.message);
+      if (!this.catalog && window.CATALOG_SEED) {
+        this.catalog = window.CATALOG_SEED;
         this.switchCategory(this.currentCategory || "home");
+        this.updateMyListBadges();
       }
     }
   }
@@ -478,16 +488,92 @@ class NetflixApp {
 
     try {
       const res = await fetch(`${API_BASE}/api/genre/${encodeURIComponent(genreName)}`);
+      if (!res.ok) throw new Error("HTTP Status " + res.status);
       const data = await res.json();
       this.renderHero(data.hero, data.heroTypeBadge);
       this.renderTop10(data.top10, data.top10Title);
       this.renderRows(data.rows);
     } catch (err) {
-      console.error(`Failed to load genre ${genreName}:`, err);
+      console.warn(`Upstream genre error for ${genreName}, generating fallback from catalog/cinemeta:`, err);
+      this.renderFallbackGenre(genreName);
     }
 
     window.scrollTo({ top: 0, behavior: "smooth" });
     if (window.lucide) lucide.createIcons();
+  }
+
+  // Fallback jika API genre offline: buat tampilan dari katalog yang ada atau Cinemeta
+  async renderFallbackGenre(genreName) {
+    try {
+      // Coba fetch langsung dari Cinemeta API
+      const cinemetaRes = await fetch(`https://v3-cinemeta.strem.io/catalog/movie/top/genre=${encodeURIComponent(genreName)}.json`);
+      if (cinemetaRes.ok) {
+        const cData = await cinemetaRes.json();
+        const metas = (cData.metas || []).slice(0, 30).map((m, idx) => ({
+          id: m.id,
+          imdbId: m.id,
+          title: m.name,
+          type: m.type || 'movie',
+          match: `${Math.floor(82 + Math.random() * 17)}% Match`,
+          year: m.releaseInfo || m.year || '2024',
+          rating: '13+',
+          duration: 'Movie',
+          quality: '4K Ultra HD',
+          overview: m.description || `Saksikan tayangan ${m.name} pilihan genre ${genreName} berkualitas tinggi Full HD.`,
+          poster: m.poster || `https://images.metahub.space/poster/small/${m.id}/img`,
+          backdrop: m.background || `https://images.metahub.space/background/medium/${m.id}/img`
+        }));
+
+        if (metas.length > 0) {
+          const hero = metas[0];
+          const top10 = metas.slice(0, 10);
+          const rows = [
+            {
+              id: `genre-${genreName.toLowerCase()}-1`,
+              title: `🔥 Terpopuler Kategori ${genreName}`,
+              items: metas.slice(0, 15)
+            },
+            {
+              id: `genre-${genreName.toLowerCase()}-2`,
+              title: `✨ Pilihan Terbaik ${genreName}`,
+              items: metas.slice(15, 30)
+            }
+          ];
+
+          this.renderHero(hero, `YukNonton ${genreName}`);
+          this.renderTop10(top10, `Top 10 Tayangan ${genreName} Hari Ini`);
+          this.renderRows(rows);
+          if (window.lucide) lucide.createIcons();
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Cinemeta direct genre fallback failed:", e);
+    }
+
+    // Fallback terakhir: filter dari catalog yang sudah ada
+    if (this.catalog) {
+      const allItems = [];
+      if (this.catalog.top10) allItems.push(...this.catalog.top10);
+      if (this.catalog.rows) {
+        this.catalog.rows.forEach(r => { if (r.items) allItems.push(...r.items); });
+      }
+
+      const hero = allItems[0] || this.currentHeroItem;
+      const top10 = allItems.slice(0, 10);
+      const rows = [
+        {
+          id: `genre-${genreName.toLowerCase()}-1`,
+          title: `🔥 Tayangan Unggulan ${genreName}`,
+          items: allItems.slice(0, 15)
+        }
+      ];
+
+      this.renderHero(hero, `YukNonton ${genreName}`);
+      this.renderTop10(top10, `Top 10 Tayangan ${genreName} Hari Ini`);
+      this.renderRows(rows);
+      if (window.lucide) lucide.createIcons();
+    }
   }
 
   renderHero(hero, badge) {
@@ -774,10 +860,38 @@ class NetflixApp {
 
     try {
       const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}`);
-      const { results } = await res.json();
-      this.renderSearchResults(results, query);
+      if (res.ok) {
+        const { results } = await res.json();
+        this.renderSearchResults(results, query);
+        return;
+      }
     } catch (err) {
-      console.error("Search error:", err);
+      console.warn("Search upstream failed, trying Cinemeta search:", err);
+    }
+
+    // Direct Cinemeta search fallback
+    try {
+      const [mRes, sRes] = await Promise.allSettled([
+        fetch(`https://v3-cinemeta.strem.io/catalog/movie/top/search=${encodeURIComponent(query)}.json`),
+        fetch(`https://v3-cinemeta.strem.io/catalog/series/top/search=${encodeURIComponent(query)}.json`)
+      ]);
+      const results = [];
+      if (mRes.status === 'fulfilled' && mRes.value.ok) {
+        const mData = await mRes.value.json();
+        (mData.metas || []).slice(0, 10).forEach(m => results.push({
+          id: m.id, imdbId: m.id, title: m.name, type: 'movie', match: '95% Match', year: m.releaseInfo || m.year || '2024', poster: m.poster || `https://images.metahub.space/poster/small/${m.id}/img`
+        }));
+      }
+      if (sRes.status === 'fulfilled' && sRes.value.ok) {
+        const sData = await sRes.value.json();
+        (sData.metas || []).slice(0, 10).forEach(s => results.push({
+          id: s.id, imdbId: s.id, title: s.name, type: 'series', match: '95% Match', year: s.releaseInfo || s.year || '2024', poster: s.poster || `https://images.metahub.space/poster/small/${s.id}/img`
+        }));
+      }
+      this.renderSearchResults(results, query);
+    } catch (e) {
+      console.error("All search failed:", e);
+      this.renderSearchResults([], query);
     }
   }
 
@@ -820,90 +934,154 @@ class NetflixApp {
   async openModal(id, type = "movie") {
     try {
       const res = await fetch(`${API_BASE}/api/detail/${id}?type=${type}`);
+      if (!res.ok) throw new Error("Status " + res.status);
       const item = await res.json();
-      this.activeItem = item;
+      this.displayModal(item);
+    } catch (err) {
+      console.warn("Detail fetch failed, using Cinemeta direct:", err);
+      // Cinemeta direct fallback
+      try {
+        const cRes = await fetch(`https://v3-cinemeta.strem.io/meta/${type}/${id}.json`);
+        if (cRes.ok) {
+          const { meta: m } = await cRes.json();
+          if (m) {
+            const seasonsMap = {};
+            if (m.videos && m.videos.length > 0) {
+              m.videos.forEach(v => {
+                const sNum = v.season || 1;
+                if (!seasonsMap[sNum]) seasonsMap[sNum] = { seasonNumber: sNum, name: `Season ${sNum}`, episodes: [] };
+                seasonsMap[sNum].episodes.push({
+                  episodeNumber: v.episode || (seasonsMap[sNum].episodes.length + 1),
+                  title: v.title || `Episode ${v.episode || 1}`,
+                  duration: '45m',
+                  overview: v.overview || m.description || 'Saksikan episode ini selengkapnya.',
+                  thumbnail: v.thumbnail || m.background || `https://episodes.metahub.space/${id}/${sNum}/${v.episode || 1}/w780.jpg`
+                });
+              });
+            }
+            this.displayModal({
+              id: m.id,
+              imdbId: m.id,
+              title: m.name,
+              type: m.type || type,
+              match: "96% Match",
+              year: m.releaseInfo || m.year || '2024',
+              rating: '13+',
+              duration: m.runtime || (m.type === 'series' ? 'Series' : '110 min'),
+              quality: '4K Ultra HD',
+              genres: m.genres || ['Action', 'Drama'],
+              overview: m.description || 'Saksikan tayangan streaming dengan subtitle Bahasa Indonesia Full HD.',
+              cast: m.cast || ['Aktor Utama'],
+              backdrop: m.background || `https://images.metahub.space/background/medium/${id}/img`,
+              poster: m.poster || `https://images.metahub.space/poster/small/${id}/img`,
+              seasons: Object.values(seasonsMap),
+              similar: (this.catalog?.top10 || []).slice(0, 6)
+            });
+            return;
+          }
+        }
+      } catch (e2) {}
 
-      this.modalBackdrop.src = item.backdrop;
-      this.modalTitle.textContent = item.title;
-      this.modalMatch.textContent = item.match;
-      this.modalYear.textContent = item.year;
-      this.modalRating.textContent = item.rating;
-      this.modalDuration.textContent = item.duration;
-      this.modalQuality.textContent = item.quality || "4K Ultra HD";
-      this.modalOverview.textContent = item.overview;
-      this.modalCast.textContent = item.cast ? item.cast.join(", ") : "-";
-      this.modalGenres.textContent = item.genres ? item.genres.join(", ") : "-";
+      // Generic fallback
+      this.displayModal({
+        id,
+        imdbId: id,
+        title: "Tayangan Streaming",
+        type: type,
+        match: "96% Match",
+        year: "2024",
+        rating: "13+",
+        duration: "110 min",
+        quality: "4K Ultra HD",
+        genres: ["Action", "Adventure"],
+        overview: "Saksikan tayangan streaming film dan serial TV dengan subtitle Bahasa Indonesia jernih Full HD.",
+        cast: ["Aktor Utama"],
+        backdrop: `https://images.metahub.space/background/medium/${id}/img`,
+        poster: `https://images.metahub.space/poster/small/${id}/img`,
+        seasons: [],
+        similar: []
+      });
+    }
+  }
 
-      this.modalPlayBtn.onclick = () => {
-        this.closeModal();
-        this.openPlayer(item);
-      };
+  displayModal(item) {
+    this.activeItem = item;
+    this.modalBackdrop.src = item.backdrop;
+    this.modalTitle.textContent = item.title;
+    this.modalMatch.textContent = item.match;
+    this.modalYear.textContent = item.year;
+    this.modalRating.textContent = item.rating;
+    this.modalDuration.textContent = item.duration;
+    this.modalQuality.textContent = item.quality || "4K Ultra HD";
+    this.modalOverview.textContent = item.overview;
+    this.modalCast.textContent = item.cast ? item.cast.join(", ") : "-";
+    this.modalGenres.textContent = item.genres ? item.genres.join(", ") : "-";
 
-      if (item.type === "series" && item.seasons && item.seasons.length > 0) {
-        this.modalEpisodesSection.classList.remove("hidden");
+    this.modalPlayBtn.onclick = () => {
+      this.closeModal();
+      this.openPlayer(item);
+    };
 
-        // Populate Season Dropdown
-        this.modalSeasonSelect.innerHTML = item.seasons.map(s => `
-          <option value="${s.seasonNumber}" class="bg-[#181818]">${s.name || 'Season ' + s.seasonNumber} (${s.episodes ? s.episodes.length : 0} Episode)</option>
-        `).join("");
+    if (item.type === "series" && item.seasons && item.seasons.length > 0) {
+      this.modalEpisodesSection.classList.remove("hidden");
 
-        const renderEpisodes = (seasonNum) => {
-          const selectedSeason = item.seasons.find(s => s.seasonNumber === seasonNum) || item.seasons[0];
-          this.modalEpisodesList.innerHTML = selectedSeason.episodes.map(ep => `
-            <div class="flex items-center space-x-4 p-3.5 rounded-lg bg-[#242424] hover:bg-[#2f2f2f] transition cursor-pointer group border border-transparent hover:border-gray-600" onclick="app.openPlayer(app.activeItem, ${seasonNum}, ${ep.episodeNumber})">
-              <span class="text-lg font-bold text-gray-400 w-6 text-center">${ep.episodeNumber}</span>
-              <div class="w-28 md:w-32 h-16 md:h-20 rounded overflow-hidden relative flex-shrink-0 bg-black/50">
-                <img src="${ep.thumbnail || item.backdrop}" alt="${ep.title}" class="w-full h-full object-cover" />
-                <div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
-                  <i data-lucide="play" class="w-6 h-6 text-white fill-current"></i>
-                </div>
-              </div>
-              <div class="flex-1 min-w-0">
-                <div class="flex justify-between items-center mb-1">
-                  <h4 class="font-bold text-sm text-white truncate pr-2">${ep.title}</h4>
-                  <span class="text-xs text-gray-400 flex-shrink-0">${ep.duration || '45m'}</span>
-                </div>
-                <p class="text-xs text-gray-400 line-clamp-2">${ep.overview || 'Tonton episode lengkap ini sekarang.'}</p>
+      // Populate Season Dropdown
+      this.modalSeasonSelect.innerHTML = item.seasons.map(s => `
+        <option value="${s.seasonNumber}" class="bg-[#181818]">${s.name || 'Season ' + s.seasonNumber} (${s.episodes ? s.episodes.length : 0} Episode)</option>
+      `).join("");
+
+      const renderEpisodes = (seasonNum) => {
+        const selectedSeason = item.seasons.find(s => s.seasonNumber === seasonNum) || item.seasons[0];
+        this.modalEpisodesList.innerHTML = selectedSeason.episodes.map(ep => `
+          <div class="flex items-center space-x-4 p-3.5 rounded-lg bg-[#242424] hover:bg-[#2f2f2f] transition cursor-pointer group border border-transparent hover:border-gray-600" onclick="app.openPlayer(app.activeItem, ${seasonNum}, ${ep.episodeNumber})">
+            <span class="text-lg font-bold text-gray-400 w-6 text-center">${ep.episodeNumber}</span>
+            <div class="w-28 md:w-32 h-16 md:h-20 rounded overflow-hidden relative flex-shrink-0 bg-black/50">
+              <img src="${ep.thumbnail || item.backdrop}" alt="${ep.title}" class="w-full h-full object-cover" />
+              <div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                <i data-lucide="play" class="w-6 h-6 text-white fill-current"></i>
               </div>
             </div>
-          `).join("");
-          if (window.lucide) lucide.createIcons();
-        };
-
-        // Initial render for season 1
-        renderEpisodes(item.seasons[0].seasonNumber);
-
-        // Change season event
-        this.modalSeasonSelect.onchange = (e) => {
-          renderEpisodes(parseInt(e.target.value));
-        };
-      } else {
-        this.modalEpisodesSection.classList.add("hidden");
-      }
-
-      if (item.similar && item.similar.length > 0) {
-        this.modalSimilarGrid.innerHTML = item.similar.map(sim => `
-          <div class="rounded-md bg-[#242424] overflow-hidden cursor-pointer hover:scale-105 transition" onclick="app.openModal('${sim.id}')">
-            <img src="${sim.backdrop || sim.poster}" class="w-full h-28 object-cover" />
-            <div class="p-3">
-              <div class="flex items-center justify-between mb-1">
-                <span class="text-xs text-green-400 font-bold">${sim.match}</span>
-                <span class="text-[10px] border border-gray-500 px-1 rounded">${sim.rating}</span>
+            <div class="flex-1 min-w-0">
+              <div class="flex justify-between items-center mb-1">
+                <h4 class="font-bold text-sm text-white truncate pr-2">${ep.title}</h4>
+                <span class="text-xs text-gray-400 flex-shrink-0">${ep.duration || '45m'}</span>
               </div>
-              <h5 class="text-sm font-bold line-clamp-1">${sim.title}</h5>
-              <p class="text-xs text-gray-400 mt-1 line-clamp-2">${sim.overview}</p>
+              <p class="text-xs text-gray-400 line-clamp-2">${ep.overview || 'Tonton episode lengkap ini sekarang.'}</p>
             </div>
           </div>
         `).join("");
-      }
+        if (window.lucide) lucide.createIcons();
+      };
 
-      this.updateModalListBtn();
-      this.detailModal.classList.remove("hidden");
-      document.body.classList.add("overflow-hidden");
-      if (window.lucide) lucide.createIcons();
-    } catch (err) {
-      console.error("Open modal error:", err);
+      renderEpisodes(item.seasons[0].seasonNumber);
+
+      this.modalSeasonSelect.onchange = (e) => {
+        renderEpisodes(parseInt(e.target.value));
+      };
+    } else {
+      this.modalEpisodesSection.classList.add("hidden");
     }
+
+    if (item.similar && item.similar.length > 0) {
+      this.modalSimilarGrid.innerHTML = item.similar.map(sim => `
+        <div class="rounded-md bg-[#242424] overflow-hidden cursor-pointer hover:scale-105 transition" onclick="app.openModal('${sim.id}')">
+          <img src="${sim.backdrop || sim.poster}" class="w-full h-28 object-cover" />
+          <div class="p-3">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs text-green-400 font-bold">${sim.match}</span>
+              <span class="text-[10px] border border-gray-500 px-1 rounded">${sim.rating}</span>
+            </div>
+            <h5 class="text-sm font-bold line-clamp-1">${sim.title}</h5>
+            <p class="text-xs text-gray-400 mt-1 line-clamp-2">${sim.overview}</p>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    this.updateModalListBtn();
+    this.detailModal.classList.remove("hidden");
+    document.body.classList.add("overflow-hidden");
+    if (window.lucide) lucide.createIcons();
   }
 
   closeModal() {
@@ -920,18 +1098,16 @@ class NetflixApp {
 
     try {
       const res = await fetch(`${API_BASE}/api/stream/${item.type || 'movie'}/${item.id}?season=${season}&episode=${episode}`);
+      if (!res.ok) throw new Error("Status " + res.status);
       this.streamsData = await res.json();
 
-      // Populate Server Select
       this.serverSelect.innerHTML = this.streamsData.streams.map(s => `
         <option value="${s.id}" class="bg-[#181818]">${s.name}</option>
       `).join("");
 
-      // Default to Server HD 1 (Real Film Embed)
       this.switchServer(this.streamsData.streams[0].id);
     } catch (err) {
-      console.error("Stream resolution error, using client-side fallback:", err);
-      // Fallback resolver lokal jika API terputus
+      console.warn("Stream resolution fallback to direct resolvers:", err);
       const type = item.type || 'movie';
       const id = item.id;
       this.streamsData = {
@@ -953,6 +1129,12 @@ class NetflixApp {
             name: "Server HD 3 (AutoEmbed Ultra)",
             type: "embed",
             url: type === 'series' ? `https://autoembed.co/tv/imdb/${id}-${season}-${episode}` : `https://autoembed.co/movie/imdb/${id}`
+          },
+          {
+            id: "stremio",
+            name: "Buka di Aplikasi Stremio",
+            type: "app",
+            url: `stremio:///detail/${type}/${id}`
           },
           {
             id: "hls",
