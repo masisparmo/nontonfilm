@@ -1,0 +1,115 @@
+/* Netflix Design System Styles */
+:root {
+  --netflix-red: #E50914;
+  --netflix-black: #141414;
+  --netflix-dark: #181818;
+  --netflix-gray: #808080;
+}
+
+body {
+  background-color: var(--netflix-black);
+  color: #FFFFFF;
+  font-family: 'Netflix Sans', 'Helvetica Neue', Segoe UI, Roboto, Ubuntu, sans-serif;
+  overflow-x: hidden;
+  user-select: none;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #141414;
+}
+::-webkit-scrollbar-thumb {
+  background: #333333;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #555555;
+}
+
+/* Hide scrollbar for carousel row */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Netflix Top 10 Giant Numbers */
+.top10-number {
+  font-size: 8rem;
+  line-height: 0.8;
+  font-weight: 900;
+  color: #141414;
+  -webkit-text-stroke: 4px #595959;
+  text-shadow: 0 0 15px rgba(0,0,0,0.8);
+  letter-spacing: -15px;
+  margin-right: -10px;
+  z-index: 10;
+  transition: all 0.3s ease;
+}
+.top10-card:hover .top10-number {
+  -webkit-text-stroke: 4px #E50914;
+  transform: scale(1.05);
+}
+
+/* Card Hover Animation */
+.movie-card {
+  transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.35s cubic-bezier(0.2, 0, 0, 1);
+  will-change: transform;
+}
+.movie-card:hover {
+  transform: scale(1.08) translateY(-6px);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.9), 0 0 12px rgba(229, 9, 20, 0.4);
+  z-index: 30;
+}
+
+/* Hero Vignette & Gradients */
+.hero-vignette {
+  background: linear-gradient(77deg, rgba(0,0,0,.8) 0%, rgba(0,0,0,0) 85%),
+              linear-gradient(180deg, rgba(20,20,20,0) 60%, #141414 100%);
+}
+
+.modal-backdrop-gradient {
+  background: linear-gradient(180deg, rgba(24,24,24,0) 40%, #181818 100%);
+}
+
+/* Player Custom Scrubber */
+input[type=range].netflix-slider {
+  -webkit-appearance: none;
+  background: transparent;
+}
+input[type=range].netflix-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  background: rgba(255,255,255,0.3);
+  border-radius: 2px;
+  cursor: pointer;
+}
+input[type=range].netflix-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 50%;
+  background: #E50914;
+  cursor: pointer;
+  margin-top: -5px;
+  transition: transform 0.1s;
+}
+input[type=range].netflix-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.4);
+}
+
+/* Shimmer Loading */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, #222 25%, #333 50%, #222 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite;
+}
